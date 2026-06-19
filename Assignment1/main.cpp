@@ -13,13 +13,48 @@
 // A working solution is preferred (assert in main() should succeed)
 // Bonus points for good tests
 
+#include <cctype>
+#include <cstddef>
 #include <string>
 #include <cassert>
 
 std::string reverse_words(const std::string &str)
 {
-    // TODO: Implement this function
-    return "???";
+    // A word is made up of letters and/or numbers.
+    std::string result = str;
+    size_t n = result.size();
+
+    for(size_t i = 0; i<n;)
+    {
+        // if it is not part of a word, skip
+        if(!std::isalpha(result[i]) && !std::isdigit(result[i]))
+        {
+            i++;
+            continue;
+        }
+
+        // start of word
+        size_t left = i;
+
+        // until end of word
+        while(i < n && (std::isalpha(result[i]) || std::isdigit(result[i])))
+        {
+            i++;
+        }
+
+        // end of word
+        size_t right = i - 1;
+
+        // reverse word
+        while (left<right)
+        {
+            std::swap(result[left], result[right]);
+            left++;
+            right--;
+        }
+    }
+
+    return result;
 }
 
 int main()
