@@ -26,6 +26,9 @@
 # Environment variable)
 import os
 import re
+import tempfile
+from pathlib import Path
+
 # SCONSTRUCT file interesting lines
 # config.version = Version(
 # major=15,
@@ -33,35 +36,104 @@ import re
 # point=6,
 # patch=0
 #)
-def updateSconstruct():
-    "Update the build number in the SConstruct file"
-    os.chmod(os.path.join(os.environ["SourcePath"],"develop","global","src","SConstruct"), 0755)
-    fin = open(os.path.join(os.environ["SourcePath"],"develop","global","src","SConstruct"), 'r')
-    fout = open(os.path.join(os.environ["SourcePath"],"develop","global","src","SConstruct1"), 'w')
-    for line in fin:
-        line=re.sub("point\=[\d]+","point="+os.environ["BuildNum"],line)
-        fout.write(line)
-    fin.close()
-    fout.close()
-    os.remove(os.path.join(os.environ["SourcePath"],"develop","global","src","SConstruct"))
-    os.rename(os.path.join(os.environ["SourcePath"],"develop","global","src","SConstruct1"),
-        os.path.join(os.environ["SourcePath"],"develop","global","src","SConstruct"))
+
 # VERSION file interesting line
 # ADLMSDK_VERSION_POINT=6
-def updateVersion():
-    "Update the build number in the VERSION file"
-    os.chmod(os.path.join(os.environ["SourcePath"],"develop","global","src","VERSION"), 0755)
-    fin = open(os.path.join(os.environ["SourcePath"],"develop","global","src","VERSION"), 'r')
-    fout = open(os.path.join(os.environ["SourcePath"],"develop","global","src","VERSION1"), 'w')
-    for line in fin:
-        line=re.sub("ADLMSDK_VERSION_POINT=[\d]+","ADLMSDK_VERSION_POINT="+os.environ["BuildNum"],line)
-        fout.write(line)
-    fin.close()
-    fout.close()
-    os.remove(os.path.join(os.environ["SourcePath"],"develop","global","src","VERSION"))
-    os.rename(os.path.join(os.environ["SourcePath"],"develop","global","src","VERSION1"),
-    os.path.join(os.environ["SourcePath"],"develop","global","src","VERSION"))
-def main():
-    updateSconstruct()
-    updateVersion()
-main()
+
+SRC_SUBDIR = Path("develop") / "global" / "src"
+
+
+def get_required_env(name: str) -> str:
+    value = os.environ.get(name)
+
+    if not value:
+        raise EnvironmentError(f"Missing required environment variable: {name}")
+
+    return value
+
+
+def update_assignment_line(line: str, key: str, new_value: str) -> tuple[str, bool]:
+    stripped = line.lstrip()
+
+    if not stripped.startswith(key):
+        return line, False
+
+    prefix, separator, suffix = line.partition("=")
+
+    if not separator:
+        return line, False
+
+    newline = "\n" if line.endswith("\n") else ""
+
+    leading_space_after_equal = ""
+    value_part = suffix.rstrip("\n")
+
+    while value_part.startswith(" "):
+        leading_space_after_equal += " "
+        value_part = value_part[1:]
+
+    trailing_comma = "," if value_part.rstrip().endswith(",") else ""
+
+    return f"{prefix}={leading_space_after_equal}{new_value}{trailing_comma}{newline}", True
+
+
+def update_file(file_path: Path, key: str, new_value: str) -> None:
+    if not file_path.exists():
+        raise FileNotFoundError(f"File not found: {file_path}")
+
+    original_permissions = file_path.stat().st_mode
+    updated_lines = []
+    replacement_count = 0
+
+    with file_path.open("r", encoding="utf-8") as file:
+        for line in file:
+            updated_line, changed = update_assignment_line(line, key, new_value)
+
+            if changed:
+                replacement_count += 1
+
+            updated_lines.append(updated_line)
+
+    if replacement_count == 0:
+        raise ValueError(f"No line found for key {key!r} in {file_path}")
+
+    if replacement_count > 1:
+        raise ValueError(f"Expected one line for key {key!r}, found {replacement_count}")
+
+    with tempfile.NamedTemporaryFile(
+        "w",
+        encoding="utf-8",
+        dir=file_path.parent,
+        delete=False,
+    ) as temp_file:
+        temp_file.writelines(updated_lines)
+        temp_path = Path(temp_file.name)
+
+    temp_path.chmod(original_permissions)
+    temp_path.replace(file_path)
+
+
+def main() -> None:
+    source_path = Path(get_required_env("SourcePath"))
+    build_num = get_required_env("BuildNum")
+
+    if not build_num.isdigit():
+        raise ValueError(f"BuildNum must be numeric, got: {build_num!r}")
+
+    src_dir = source_path / SRC_SUBDIR
+
+    update_file(
+        file_path=src_dir / "SConstruct",
+        key="point",
+        new_value=build_num,
+    )
+
+    update_file(
+        file_path=src_dir / "VERSION",
+        key="ADLMSDK_VERSION_POINT",
+        new_value=build_num,
+    )
+
+
+if __name__ == "__main__":
+    main()
